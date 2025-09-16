@@ -2,7 +2,7 @@
 [necessary]
 
 # Image path 转黑线的图片路径
-path = "kaida.jpg"
+path = "tbc.png"
 
 # Generation type 生成类型
 # - XY: 生成于x-y平面
@@ -24,7 +24,7 @@ time = 1000
 [XY]
 # XY range XY模式生成位置范围
 # - xy_range = [[startX, endX], [startY, endY]]
-xy_range = [[0.00, 1.00], [0.00, 1.00]]
+xy_range = [[-0.50, 1.50], [0.25, 0.75]]
 
 [XZ]
 # XZ range XZ模式生成位置范围
@@ -67,3 +67,6 @@ output_path = "output.aff"
 
 # Allow 0ms arcTrace 是否允许0ms黑线
 allow_0ms = false
+
+# Smoothy edges 是否平滑边缘
+smooth_edges = false

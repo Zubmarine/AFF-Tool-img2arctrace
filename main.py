@@ -195,11 +195,14 @@ class ImageToArcTraceConverter:
         # 图像预处理流水线（使用局部变量减少属性访问开销）
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         kernel = np.ones((4, 4), np.uint8)
-        eroded = cv2.erode(gray, kernel, iterations=1)
-        dilated = cv2.dilate(eroded, kernel, iterations=1)
+        final_img = gray
+        if self.config.smooth_edges:
+            eroded = cv2.erode(gray, kernel, iterations=1)
+            dilated = cv2.dilate(eroded, kernel, iterations=1)
+            final_img = dilated
         
         # 二值化（THRESH_OTSU自动计算阈值，适应不同亮度图像）
-        _, binary = cv2.threshold(dilated, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        _, binary = cv2.threshold(final_img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
         # 提取轮廓（RETR_TREE保留层级，CHAIN_APPROX_SIMPLE压缩轮廓点）
         contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
