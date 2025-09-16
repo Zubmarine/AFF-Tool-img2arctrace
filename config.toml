@@ -1,0 +1,69 @@
+# 必填配置
+[necessary]
+
+# Image path 转黑线的图片路径
+path = "kaida.jpg"
+
+# Generation type 生成类型
+# - XY: 生成于x-y平面
+# - XZ: 生成于x-z平面
+# - YZ: 生成于y-z平面
+# - FREEMODE: 自由平面模式
+type = "XY"
+
+# BPM
+bpm = 180.00
+
+# Time(ms) 生成位置时间戳
+time = 1000
+
+# ---------------------------------------------
+
+# 位置配置
+
+[XY]
+# XY range XY模式生成位置范围
+# - xy_range = [[startX, endX], [startY, endY]]
+xy_range = [[0.00, 1.00], [0.00, 1.00]]
+
+[XZ]
+# XZ range XZ模式生成位置范围
+# - xz_range = [[startX, endX], beats]
+# --- beats 生成黑线所占拍数
+# - y_position Y轴位置
+xz_range = [[0.00, 1.00], 1.00]
+y_position = 0.00
+
+[YZ]
+# YZ range YZ模式生成位置范围
+# - yz_range = [[startY, endY], beats]
+# --- beats 生成黑线所占拍数
+# - x_position X轴位置
+yz_range = [[0.00, 1.00], 2.00]
+x_position = -0.50
+
+[FREEMODE]
+# FREEMODE range 自由平面模式生成位置范围
+# Give 4 points to define the free plane        给定四个点确定生成图片的平面位置
+# 4 points should be in counter-clockwise order 四个点应按逆时针顺序给出
+# And p0 should be the bottom-left point        p0应为左下角点
+# 4 points should be in the same plane          四个点应在同一平面内
+# - pN = [x, y, z]
+# - is_beats_mode 是否为拍子模式
+# --- If false, z should be time(ms)            若为非拍子模式，则z应为时间戳
+is_beats_mode = true
+p0 = [0.00, 0.00, 0.00]
+p1 = [1.25, 0.50, 0.50]
+p2 = [1.00, 1.00, 1.50]
+p3 = [-0.25, 0.50, 1.00]
+
+# ---------------------------------------------
+
+# 选填配置
+[optional]
+
+# Output path aff输出路径
+output_path = "output.aff"
+
+# Allow 0ms arcTrace 是否允许0ms黑线
+allow_0ms = false
