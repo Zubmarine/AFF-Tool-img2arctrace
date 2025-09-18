@@ -2,8 +2,8 @@ import tomllib
 import numpy as np
 from dataclasses import dataclass
 from typing import Union, List, Tuple
-import cv2  # 统一cv2导入方式，避免分散调用
-from pathlib import Path  # 增强路径处理能力
+import cv2
+from pathlib import Path 
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,9 @@ class Config:
     # 输出配置
     output_path: Path
     allow_0ms: bool
-    # 模式配置（根据type动态生效）
+    smooth_edges: bool
+    ratio: Tuple[float, float]
+    # 模式配置
     xy_range: Tuple[Tuple[float, float], Tuple[float, float]]
     xz_range: Tuple[Tuple[float, float], float]
     xz_y_pos: float
@@ -88,6 +90,8 @@ def load_config(config_path: Union[str, Path] = "config.toml") -> Config:
             # 输出配置
             output_path=Path(optional.get("output_path", "arc_output.aff")),
             allow_0ms=optional.get("allow_0ms", False),
+            smooth_edges=optional.get("smooth_edges", False),
+            ratio=tuple(optional.get("ratio", (1.0, 1.0))),
             # 模式配置
             xy_range=mode_config.get("xy_range", ((0.0, 1.0), (0.0, 1.0))),
             xz_range=mode_config.get("xz_range", ((0.0, 1.0), 1.0)),
@@ -95,7 +99,7 @@ def load_config(config_path: Union[str, Path] = "config.toml") -> Config:
             yz_range=mode_config.get("yz_range", ((0.0, 1.0), 1.0)),
             yz_x_pos=mode_config.get("x_position", 0.0),
             freemode_is_beats=mode_config.get("is_beats_mode", False),
-            freemode_quad=tuple(mode_config.get("p"+str(i), ()) for i in range(4))
+            freemode_quad=tuple(mode_config.get("p"+str(i), [1.0]) for i in range(4))
         )
     except KeyError as e:
         raise KeyError(f"配置项缺失: {e}") from e
@@ -104,7 +108,7 @@ def load_config(config_path: Union[str, Path] = "config.toml") -> Config:
 
 def map_to_quadrilateral(u: float, v: float, quad: Tuple[Tuple[float, ...], ...]) -> Tuple[float, float, float]:
     """
-    将单位矩形内的点(u, v)映射到3D四边形（双线性插值）
+    将单位矩形内的点(u, v)映射到3D四边形
     
     Args:
         u: 单位矩形X坐标（0≤u≤1）
@@ -114,11 +118,11 @@ def map_to_quadrilateral(u: float, v: float, quad: Tuple[Tuple[float, ...], ...]
     Returns:
         映射后的3D坐标(x, y, z)
     """
-    # 确保u/v在有效范围（避免图像边缘误差导致的越界）
+    # 确保u/v在有效范围
     u_clamped = max(0.0, min(1.0, u))
     v_clamped = max(0.0, min(1.0, v))
     
-    # 双线性插值（向量化计算，比循环更高效）
+    # 双线性插值
     p0, p1, p2, p3 = [np.array(pt, dtype=np.float64) for pt in quad]
     bottom_edge = (1 - u_clamped) * p0 + u_clamped * p1
     top_edge = (1 - u_clamped) * p3 + u_clamped * p2
@@ -147,7 +151,7 @@ class ImageToArcTraceConverter:
         if self.config.type not in valid_modes:
             raise ValueError(f"无效模式: {self.config.type}，支持模式: {valid_modes}")
         
-        # 验证范围配置（最小值<最大值）
+        # 验证范围配置
         mode = self.config.type
         if mode == "XY":
             x_min, x_max = self.config.xy_range[0]
@@ -183,49 +187,56 @@ class ImageToArcTraceConverter:
         
         Args:
             img_path: 图像路径
-            epsilon: 轮廓近似精度（用于approxPolyDP）
+            epsilon: 轮廓近似精度
         
         Returns:
-            提取到的轮廓列表（每个轮廓为np.ndarray）
+            提取到的轮廓列表
         """
         img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"无法读取图像: {img_path.absolute()}（可能是格式不支持或文件损坏）")
         
-        # 图像预处理流水线（使用局部变量减少属性访问开销）
+        # 图像预处理流水线
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         kernel = np.ones((4, 4), np.uint8)
+        # 应用缩放
+        if self.config.ratio != (1.0, 1.0):
+            new_width = max(1, int(gray.shape[1] * self.config.ratio[0]))
+            new_height = max(1, int(gray.shape[0] * self.config.ratio[1]))
+            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_AREA)
         final_img = gray
+        img_shape = gray.shape[:2]
+        # 平滑边缘
         if self.config.smooth_edges:
             eroded = cv2.erode(gray, kernel, iterations=1)
             dilated = cv2.dilate(eroded, kernel, iterations=1)
             final_img = dilated
         
-        # 二值化（THRESH_OTSU自动计算阈值，适应不同亮度图像）
+        # 二值化
         _, binary = cv2.threshold(final_img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
-        # 提取轮廓（RETR_TREE保留层级，CHAIN_APPROX_SIMPLE压缩轮廓点）
+        # 提取轮廓
         contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         
-        # 轮廓近似（减少轮廓点数量，优化后续计算）
-        return [cv2.approxPolyDP(contour, epsilon, True) for contour in contours]
+        # 轮廓近似
+        return [cv2.approxPolyDP(contour, epsilon, True) for contour in contours], img_shape
     
     def _convert_contours_to_points(self, contours: List[np.ndarray], img_shape: Tuple[int, int]) -> List[List[Point]]:
         """
-        将轮廓转换为单位矩形内的Point列表（归一化到[0,1]）
+        将轮廓转换为单位矩形内的Point列表
         
         Args:
             contours: 预处理后的轮廓列表
             img_shape: 图像形状（高度，宽度）
         
         Returns:
-            轮廓点列表（每个轮廓对应一个Point列表）
+            轮廓点列表
         """
         img_height, img_width = img_shape
         contour_points = []
         
         for contour in contours:
-            # 轮廓点归一化：x→[0,1]（图像宽度方向），y→[0,1]（图像高度方向，翻转y轴）
+            # 轮廓点归一化：x→[0,1]，y→[0,1]（翻转y轴）
             points = [
                 Point(
                     x=float(pt[0][0]) / img_width,
@@ -233,7 +244,7 @@ class ImageToArcTraceConverter:
                 )
                 for pt in contour
             ]
-            # 过滤重复点（避免相邻点相同导致无效轨迹）
+            # 过滤重复点
             filtered_points = []
             for p in points:
                 if not filtered_points or not (np.isclose(p.x, filtered_points[-1].x) and np.isclose(p.y, filtered_points[-1].y)):
@@ -245,7 +256,7 @@ class ImageToArcTraceConverter:
     
     def _generate_arc_traces(self, contour_points: List[List[Point]]) -> List[ArcTrace]:
         """
-        根据模式生成ArcTrace列表（核心逻辑模块化，按模式拆分）
+        根据模式生成ArcTrace列表
         
         Args:
             contour_points: 轮廓点列表
@@ -305,7 +316,7 @@ class ImageToArcTraceConverter:
         if np.isclose(p1.x, p2.x) and np.isclose(p1.y, p2.y):
             return None
         
-        # 确保p1.y ≤ p2.y（按z轴顺序排序）
+        # 确保p1.y ≤ p2.y
         if p1.y > p2.y:
             p1, p2 = p2, p1
         
@@ -314,10 +325,10 @@ class ImageToArcTraceConverter:
         z_scale = self.config.xz_range[1]
         y_pos = self.config.xz_y_pos
         
-        # 计算时间（z轴对应时间）
+        # 计算时间
         start_time = self.config.time + int(p1.y * ms_per_beat * z_scale)
         end_time = self.config.time + int(p2.y * ms_per_beat * z_scale)
-        # 相同z轴时添加时间偏移（避免0ms时长）
+        # 相同z轴时添加时间偏移
         end_time += self.ms_addition if np.isclose(p1.y, p2.y) else 0
         
         return ArcTrace(
@@ -335,7 +346,7 @@ class ImageToArcTraceConverter:
         if np.isclose(p1.x, p2.x) and np.isclose(p1.y, p2.y):
             return None
         
-        # 确保p1.x ≤ p2.x（按z轴顺序排序）
+        # 确保p1.x ≤ p2.x
         if p1.x > p2.x:
             p1, p2 = p2, p1
         
@@ -344,10 +355,10 @@ class ImageToArcTraceConverter:
         z_scale = self.config.yz_range[1]
         x_pos = self.config.yz_x_pos
         
-        # 计算时间（z轴对应时间）
+        # 计算时间
         start_time = self.config.time + int(p1.x * ms_per_beat * z_scale)
         end_time = self.config.time + int(p2.x * ms_per_beat * z_scale)
-        # 相同z轴时添加时间偏移（避免0ms时长）
+        # 相同z轴时添加时间偏移
         end_time += self.ms_addition if np.isclose(p1.x, p2.x) else 0
         
         return ArcTrace(
@@ -371,11 +382,15 @@ class ImageToArcTraceConverter:
         m1 = Point(*mapped1)
         m2 = Point(*mapped2)
         
-        # 确保m1.z ≤ m2.z（按z轴顺序排序）
+        # 跳过相同点
+        if m1 == m2:
+            return None
+
+        # 确保m1.z ≤ m2.z
         if m1.z > m2.z:
             m1, m2 = m2, m1
         
-        # 计算时间（根据是否为节拍模式）
+        # 计算时间
         if self.config.freemode_is_beats:
             start_time = self.config.time + int(m1.z * ms_per_beat)
             end_time = self.config.time + int(m2.z * ms_per_beat)
@@ -383,7 +398,7 @@ class ImageToArcTraceConverter:
             start_time = int(m1.z)
             end_time = int(m2.z)
         
-        # 相同z轴时添加时间偏移（避免0ms时长）
+        # 相同z轴时添加时间偏移
         end_time += self.ms_addition if np.isclose(m1.z, m2.z) else 0
         
         return ArcTrace(
@@ -412,8 +427,7 @@ class ImageToArcTraceConverter:
         
         # 1. 图像预处理
         img = cv2.imread(str(self.config.img_path))
-        img_shape = img.shape[:2]  # (高度, 宽度)
-        contours = self._preprocess_image(self.config.img_path, epsilon)
+        contours, img_shape = self._preprocess_image(self.config.img_path, epsilon)
         
         # 2. 轮廓转单位矩形点
         contour_points = self._convert_contours_to_points(contours, img_shape)
@@ -429,16 +443,19 @@ class ImageToArcTraceConverter:
         
         Args:
             arc_traces: 要保存的ArcTrace列表
-            out_path: 输出路径（默认使用配置中的output_path）
+            out_path: 输出路径
         """
         out_path = Path(out_path) if out_path else self.config.output_path
         
         # 确保输出目录存在
         out_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 写入文件（使用f-string格式化，比%更清晰）
         with open(out_path, "w", encoding="utf-8") as f:
-            for trace in arc_traces:
+            for ln, trace in enumerate(arc_traces):
+                if (trace.endTime == trace.startTime) and (f"{trace.endX:.2f}" == f"{trace.startX:.2f}") and (f"{trace.endY:.2f}" == f"{trace.startY:.2f}"):
+                    # 跳过无效轨迹
+                    arc_traces.remove(trace)
+                    continue
                 f.write(
                     f"arc({trace.startTime},{trace.endTime},{trace.startX:.2f},{trace.endX:.2f},s,"
                     f"{trace.startY:.2f},{trace.endY:.2f},0,none,true);\n"
@@ -456,6 +473,10 @@ def main(config_path: Union[str, Path] = "config.toml"):
         # 加载配置
         config = load_config(config_path)
         print(f"成功加载配置，模式: {config.type}，图像: {config.img_path.name}")
+        if config.ratio != (1.0, 1.0):
+            print(f"应用缩放比例: x{config.ratio[0]:.2f}, y{config.ratio[1]:.2f}")
+            if not config.smooth_edges:
+                print("注意：平滑边缘未启用")
         
         # 初始化转换器并处理
         converter = ImageToArcTraceConverter(config)
@@ -471,7 +492,7 @@ def main(config_path: Union[str, Path] = "config.toml"):
 
 
 if __name__ == "__main__":
-    # 支持命令行传入配置文件路径（示例：python script.py custom_config.toml）
+    # 支持命令行传入配置文件路径
     import sys
     config_path = sys.argv[1] if len(sys.argv) > 1 else "config.toml"
     main(config_path)

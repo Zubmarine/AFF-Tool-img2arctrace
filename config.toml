@@ -2,14 +2,14 @@
 [necessary]
 
 # Image path 转黑线的图片路径
-path = "tbc.png"
+path = "kaida.jpg"
 
 # Generation type 生成类型
 # - XY: 生成于x-y平面
 # - XZ: 生成于x-z平面
 # - YZ: 生成于y-z平面
 # - FREEMODE: 自由平面模式
-type = "XY"
+type = "FREEMODE"
 
 # BPM
 bpm = 180.00
@@ -68,5 +68,9 @@ output_path = "output.aff"
 # Allow 0ms arcTrace 是否允许0ms黑线
 allow_0ms = false
 
-# Smoothy edges 是否平滑边缘
+# Smooth edges 是否平滑图像边缘
 smooth_edges = false
+
+# Image zoom 图片缩放比例
+# - ratio = [x_ratio, y_ratio]
+ratio = [1.00, 1.00]
